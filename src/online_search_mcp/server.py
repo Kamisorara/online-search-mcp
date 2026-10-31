@@ -1,4 +1,4 @@
-"""MCP 服务入口：注册 search_web / fetch_url_content 两个工具，stdio 传输。"""
+"""MCP 服务入口：注册 search_web / search_github / fetch_url_content 三个工具，stdio 传输。"""
 
 from __future__ import annotations
 
@@ -26,10 +26,10 @@ logger = logging.getLogger("online_search_mcp.server")
 mcp = MCPServer(
     name="online-search",
     instructions=(
-        "联网搜索服务：通用检索用 search_web；找开源项目/示例代码用 search_github"
-        "（支持 language:/stars:/topic: 等限定符）；"
-        "再用 fetch_url_content 读取具体网页或仓库 README 的正文。"
-        "搜索结果里的摘要不完整时务必抓取原文。"
+        "联网搜索服务：通用检索用 search_web（需要直接答案时加 fetch_top=2 顺带抓正文摘要）；"
+        "找开源项目/示例代码用 search_github（支持 language:/stars:/topic: 等限定符）；"
+        "再用 fetch_url_content 读取具体网页正文——GitHub/PyPI/Stack Overflow/Wikipedia "
+        "会自动走官方数据源，更快更干净。搜索结果里的摘要不完整时务必抓取原文。"
     ),
 )
 
@@ -40,6 +40,7 @@ def search_web(
     max_results: int = 8,
     timelimit: str | None = None,
     region: str = "wt-wt",
+    fetch_top: int = 0,
 ) -> str:
     """联网搜索（DuckDuckGo），返回带链接的结果列表。
 
@@ -48,9 +49,13 @@ def search_web(
         max_results: 返回条数上限，默认 8（1-20）。
         timelimit: 时效性过滤：None 不限 / "d" 一天 / "w" 一周 / "m" 一月 / "y" 一年。新闻类查询建议 "w" 或 "d"。
         region: 地区语言偏好："wt-wt" 全球 / "cn-zh" 中文 / "us-en" 美国英文。
+        fetch_top: 同时抓取前 N 条（0-3）结果的正文摘要（各约 800 字，并发纯 HTTP）。
+            需要直接答案、不想再逐条 fetch 时设 2-3；默认 0 保持低延迟。
     """
-    logger.info("search_web: %r", query)
-    return web_search(query, max_results=max_results, timelimit=timelimit, region=region)
+    logger.info("search_web: %r (fetch_top=%d)", query, fetch_top)
+    return web_search(
+        query, max_results=max_results, timelimit=timelimit, region=region, fetch_top=fetch_top
+    )
 
 
 @mcp.tool()

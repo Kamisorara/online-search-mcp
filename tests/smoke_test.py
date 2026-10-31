@@ -56,6 +56,26 @@ async def run_smoke_test() -> int:
             if result.is_error or "失败" in text[:80]:
                 failures.append(f"search_web 未返回有效结果: {text[:200]}")
 
+            # ---- 3b. 搜索缓存：同参数第二次调用应命中 ----
+            result = await session.call_tool(
+                "search_web", {"query": SEARCH_QUERY, "max_results": 5, "timelimit": "y"}
+            )
+            text = _result_text(result)
+            if "搜索缓存命中" not in text:
+                failures.append("search_web 第二次同参调用未命中搜索缓存")
+            else:
+                print("== 3b. 搜索缓存命中 OK ==")
+
+            # ---- 3c. fetch_top 正文速览 ----
+            result = await session.call_tool(
+                "search_web", {"query": "python httpx tutorial", "max_results": 3, "fetch_top": 2}
+            )
+            text = _result_text(result)
+            if result.is_error or "正文速览" not in text:
+                failures.append(f"fetch_top=2 未返回正文速览: {text[:200]}")
+            else:
+                print("== 3c. fetch_top 正文速览 OK ==")
+
             # ---- search_github ----
             github_query = "mcp server language:python stars:>1000"
             print(f"\n== 4. search_github: {github_query!r} ==")
@@ -76,6 +96,41 @@ async def run_smoke_test() -> int:
             print(text[:800])
             if result.is_error:
                 failures.append(f"fetch_url_content 出错: {text[:200]}")
+
+            # ---- 5b/5c/5d. 站点专用通道：PyPI / GitHub / Stack Overflow ----
+            for label, site_url, expect in (
+                ("PyPI", "https://pypi.org/project/httpx/", "PyPI 官方 JSON"),
+                ("GitHub", "https://github.com/encode/httpx", "GitHub API"),
+                (
+                    "StackOverflow",
+                    "https://stackoverflow.com/questions/231767/what-does-the-yield-keyword-do-in-python",
+                    "Stack Exchange 官方 API",
+                ),
+            ):
+                result = await session.call_tool(
+                    "fetch_url_content", {"url": site_url, "max_chars": 2000}
+                )
+                text = _result_text(result)
+                if result.is_error or expect not in text[:100]:
+                    failures.append(f"{label} 站点通道未生效（缺「{expect}」标注）: {text[:150]}")
+                else:
+                    print(f"== 5x. {label} 站点通道 OK ==")
+
+        # ---- 6. doctor 健康自检（离线模式，子进程跑） ----
+        import subprocess
+
+        proc = subprocess.run(
+            [str(PYTHON_EXE), "-m", "online_search_mcp.doctor", "--offline"],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            cwd=str(PROJECT_DIR),
+            timeout=120,
+        )
+        if proc.returncode != 0 or "全部检查通过" not in (proc.stdout or ""):
+            failures.append(f"doctor --offline 异常: {proc.stdout[-300:] if proc.stdout else proc.stderr[-300:]}")
+        else:
+            print("== 6. doctor --offline OK ==")
 
     print("\n" + "=" * 50)
     if failures:

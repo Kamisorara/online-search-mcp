@@ -1,7 +1,7 @@
 [project]
 name = "online-search-mcp"
-version = "0.1.0"
-description = "本地联网搜索 MCP 服务：DuckDuckGo 搜索 + 网页正文阅读，供智能体使用"
+version = "0.2.0"
+description = "本地联网搜索 MCP 服务：多引擎聚合搜索 + GitHub 搜索 + 网页阅读（站点专用通道 / 无头浏览器兜底 / 自动跟随系统代理）"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [

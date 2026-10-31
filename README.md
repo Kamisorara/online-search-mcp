@@ -2,9 +2,9 @@
 
 本地联网搜索 MCP（Model Context Protocol）服务，供智能体使用：
 
-- **`search_web`** — DuckDuckGo 联网搜索（免费、无需 API Key），支持时效性过滤和地区偏好
+- **`search_web`** — DuckDuckGo 联网搜索（免费、无需 API Key），支持时效性过滤和地区偏好；可加 `fetch_top=N` 顺带抓取前几条结果的正文摘要，一步拿到答案
 - **`search_github`** — GitHub 仓库搜索（官方 API），支持 `language:` / `stars:` / `topic:` / `pushed:` 等限定符，找开源项目和案例用
-- **`fetch_url_content`** — 抓取网页正文并转为 Markdown（自动去导航/广告、处理中文编码）；JS 渲染/反爬页面自动降级到无头浏览器渲染
+- **`fetch_url_content`** — 抓取网页正文并转为 Markdown（自动去导航/广告、处理中文编码，正文前附带标题与发布日期）；GitHub/PyPI/Stack Overflow/Wikipedia 自动走官方数据源，JS 渲染/反爬页面自动降级到无头浏览器渲染
 
 基于 Python + 官方 `mcp` SDK 2.x（MCPServer），stdio 传输，兼容所有标准 MCP 客户端。
 
@@ -105,21 +105,48 @@ PLAYWRIGHT_DOWNLOAD_HOST=https://cdn.npmmirror.com/binaries/playwright .venv\Scr
 
 | 工具 | 参数 | 说明 |
 |---|---|---|
-| `search_web` | `query`（必填）、`max_results=8`、`timelimit=None`（d/w/m/y）、`region="wt-wt"`（cn-zh 中文） | 返回带链接的 Markdown 结果列表；被限流/断网时返回友好错误说明而非崩溃 |
+| `search_web` | `query`（必填）、`max_results=8`、`timelimit=None`（d/w/m/y）、`region="wt-wt"`（cn-zh 中文）、`fetch_top=0`（0-3） | 返回带链接的 Markdown 结果列表；`fetch_top>0` 时并发抓取前 N 条正文摘要（各约 800 字）；被限流/断网时返回友好错误说明而非崩溃 |
 | `search_github` | `query`（必填，支持限定符）、`max_results=8`、`sort="best-match"`（stars/forks/updated） | 官方 API 免认证限 10 次/分钟；设 `GITHUB_TOKEN` 环境变量提升到 30 次/分钟 |
-| `fetch_url_content` | `url`（必填）、`max_chars=20000` | trafilatura 提取正文转 Markdown，超长截断并标注 |
+| `fetch_url_content` | `url`（必填）、`max_chars=20000`、`render_mode="auto"` | trafilatura 提取正文转 Markdown（正文前带标题/发布日期），超长截断并标注；智能体高频站点自动走官方数据源 |
 
-`fetch_url_content` 的抓取策略（两级 + 缓存）：
+### 站点专用通道
 
-1. **快路径**：纯 HTTP 抓取（0.1-1s），绝大多数网页走这条
-2. **兜底**：HTTP 拿不到足够正文（正文 <500 字、被 403/429/5xx 拦截、或检测到人机验证页）时，自动用无头 Chromium 渲染后再提取（约 3-8s），结果带 `[正文经无头浏览器渲染后提取]` 标记
-3. **缓存**：同一 URL 5 分钟内重复抓取直接命中缓存（快数百倍），结果带 `[缓存命中]` 标记；发生重定向时结尾标注最终 URL
+`fetch_url_content` 对以下站点自动改走官方数据源（更快、更干净、无反爬），命中时结果开头带 `[经站点专用通道读取（…）]` 标注；通道失败自动回落通用抓取，不影响整体可用性：
 
-`render_mode` 参数可显式控制：`auto`（默认）/ `request`（强制纯 HTTP，最快）/ `browser`（强制渲染，已知 JS 页面用）。
+| 站点 | 数据源 | 说明 |
+|---|---|---|
+| `github.com/{o}/{r}` 及 `/tree/…` | GitHub API | 仓库元信息（⭐/语言/更新）+ README 原文 |
+| `github.com/…/blob/{ref}/{path}` | raw.githubusercontent | 源文件直读（文本类扩展名，代码自动包代码块） |
+| `pypi.org/project/{name}` | PyPI JSON API | 版本/摘要/作者/文档链接/顶级依赖 |
+| Stack Overflow 及 Stack Exchange 系问答 | Stack Exchange API | 问题 + 采纳回答排最前、其余按票数 |
+| `{lang}.wikipedia.org/wiki/…` | Wikipedia REST | 词条全文（大陆网络需开系统代理） |
 
-`search_web` 的三层防线：ddgs 多引擎聚合（失败重试 3 次）→ 全部失败时**无头浏览器搜百度兜底** → 仍失败返回友好错误。同时内置**自限流**（默认 6 次/分钟，`SEARCH_RPM` 可调），防止频繁搜索触发引擎对整个 IP 的封锁。
+### `fetch_url_content` 的抓取策略（四级 + 缓存）
 
-相关环境变量：`FETCH_BROWSER=off` 关闭浏览器兜底；`FETCH_BROWSER_TIMEOUT=秒`（默认 20）；`FETCH_CACHE_TTL=秒` / `FETCH_CACHE_MAX=条`（默认 300/64，设 0 禁用）；`SEARCH_RPM=次/分钟`（默认 6）。
+1. **站点专用通道**：上表站点走官方 API/raw 直读（0.3-1s，最快最干净）
+2. **快路径**：纯 HTTP + trafilatura 抓取（0.1-1s），绝大多数网页走这条
+3. **llms.txt 生态**：正文不够时找站点提供的 Markdown 副本（HTML 里声明的 `text/markdown` 链接，或盲试 `url+".md"`），比浏览器渲染快一个量级
+4. **兜底**：仍拿不到足够正文（正文 <500 字、被 403/429/5xx 拦截、或检测到人机验证页）时，自动用无头 Chromium 渲染后再提取（约 3-8s），结果带 `[正文经无头浏览器渲染后提取]` 标记
+5. **缓存**：同一 URL 5 分钟内重复抓取直接命中缓存（快数百倍），结果带 `[缓存命中]` 标记；发生重定向时结尾标注最终 URL
+
+`render_mode` 参数可显式控制：`auto`（默认）/ `request`（强制纯 HTTP，最快，跳过浏览器兜底）/ `browser`（强制渲染，已知 JS 页面用）。
+
+### `search_web` 的防线与缓存
+
+- 三层防线：ddgs 多引擎聚合（失败重试 3 次）→ 全部失败时**无头浏览器搜百度兜底** → 仍失败返回友好错误
+- **自限流**：默认 6 次/分钟（`SEARCH_RPM` 可调），防止频繁搜索触发引擎对整个 IP 的封锁
+- **搜索缓存**：同参数查询 5 分钟内直接命中（不占限流配额，智能体重复搜索很常见），带 `[搜索缓存命中]` 标记
+
+## 健康自检（doctor）
+
+排查问题一键体检，输出各依赖版本、代理来源、浏览器兜底、GitHub/PyPI/ddgs 各通道连通性与配额：
+
+```bash
+.venv\Scripts\python -m online_search_mcp.doctor           # 全量检查（含真实网络探测）
+.venv\Scripts\python -m online_search_mcp.doctor --offline # 只看配置，不联网
+```
+
+相关环境变量：`FETCH_BROWSER=off` 关闭浏览器兜底；`FETCH_BROWSER_TIMEOUT=秒`（默认 20）；`FETCH_CACHE_TTL=秒` / `FETCH_CACHE_MAX=条`（默认 300/64，设 0 禁用）；`SEARCH_RPM=次/分钟`（默认 6）；`SEARCH_CACHE_TTL=秒` / `SEARCH_CACHE_MAX=条`（默认 300/32，设 0 禁用）。
 
 ## 开发
 
@@ -137,12 +164,20 @@ PLAYWRIGHT_DOWNLOAD_HOST=https://cdn.npmmirror.com/binaries/playwright .venv\Scr
 - [duckduckgo-mcp-server](https://github.com/nickclyde/duckduckgo-mcp-server)（MIT）— TTL 缓存、滑动窗口限流
 - [open-webSearch](https://github.com/Aas-ee/open-webSearch)（Apache-2.0）— renderMode 三档、人机验证页检测
 - [one-search-mcp](https://github.com/yokingma/one-search-mcp)（MIT）— 浏览器本地搜索引擎兜底思路
+- [mcpsurfr](https://github.com/nkapila6/mcpsurfr)（MIT）— 站点专用通道（GitHub/PyPI/Stack Exchange/Wikipedia）、llms.txt Markdown 副本、正文附带标题与日期、搜索缓存
+- [agent-search-mcp](https://github.com/lennney/agent-search-mcp)（Apache-2.0）— doctor 自检命令形态
+- [wigolo](https://github.com/KnockOutEZ/wigolo)（AGPL-3.0，仅思路参考未搬代码）— doctor 命令、结果附正文的产品思路
 
 ## 已知限制
 
-- DuckDuckGo 免费接口有匿名限流，短时间大量搜索可能被暂时封禁（服务内置 3 次退避重试）
+- DuckDuckGo 免费接口有匿名限流，短时间大量搜索可能被暂时封禁（服务内置 3 次退避重试 + 自限流）
 - **登录墙绕不过**：无头浏览器能过多数反爬（实测知乎的 403 可以），但需要登录才能看的内容依然拿不到（会返回登录提示原文）
 - 无头浏览器也过不了的强反爬（Cloudflare 五秒盾、验证码）依然失败，返回明确提示
 - 二进制内容（PDF/图片）不做解析，返回提示信息
 - 滚动才懒加载的内容可能缺失（只渲染首屏）
 - 连接层失败（域名不通/被墙）不做浏览器兜底，直接返回代理配置提示
+- 站点专用通道依赖对应官方 API 的可达性（大陆直连下 Wikipedia 可能不通），失败自动回落通用抓取
+
+## License
+
+[MIT](LICENSE)

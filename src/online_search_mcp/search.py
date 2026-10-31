@@ -11,7 +11,9 @@ import os
 import sys
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 
+from .cache import TTLCache
 from .proxy import detect_proxy
 
 logger = logging.getLogger("online_search_mcp.search")
@@ -57,6 +59,11 @@ def _env_int(name: str, default: int) -> int:
 #: 搜索全局限流器（保护匿名引擎配额，防止自杀式触发封锁）
 _search_limiter = SlidingWindowLimiter(_env_int("SEARCH_RPM", 6))
 
+#: 搜索结果缓存（同参数重复搜索直接命中，不占限流配额；mcpsurfr 思路）
+search_cache = TTLCache(
+    ttl_seconds=_env_int("SEARCH_CACHE_TTL", 300), max_entries=_env_int("SEARCH_CACHE_MAX", 32)
+)
+
 
 def get_proxy() -> str | None:
     """探测代理：环境变量 > Windows 系统代理（Clash 等工具的开关）。"""
@@ -68,6 +75,7 @@ def web_search(
     max_results: int = 8,
     timelimit: str | None = None,
     region: str = "wt-wt",
+    fetch_top: int = 0,
 ) -> str:
     """执行搜索并返回 Markdown 格式结果列表。
 
@@ -76,12 +84,21 @@ def web_search(
         max_results: 返回结果条数上限（1-20）。
         timelimit: 时间范围过滤，None 不限 / "d" 一天 / "w" 一周 / "m" 一月 / "y" 一年。
         region: 地区与语言，如 "wt-wt"（全球/英文偏重）、"cn-zh"（中文）。
+        fetch_top: 附带抓取前 N 条（0-3）结果的正文摘要（每条约 800 字，纯 HTTP 并发），
+            需要直接答案而非链接清单时开启；默认 0 关闭以保持低延迟。
     """
     from ddgs import DDGS  # 延迟导入，加快 MCP 启动
 
     max_results = max(1, min(int(max_results), 20))
+    fetch_top = max(0, min(int(fetch_top), 3))
     if timelimit not in _VALID_TIMELIMITS:
         timelimit = None
+
+    # ---- 缓存命中：直接返回，不占限流配额（智能体重复搜索很常见） ----
+    cache_key = f"{query}|{max_results}|{timelimit}|{region}|{fetch_top}"
+    cached = search_cache.get(cache_key)
+    if cached is not None:
+        return "[搜索缓存命中]\n\n" + cached
 
     # 自限流保护：超频快速失败，不做长阻塞（工具调用挂在等待里对智能体更糟）
     wait = _search_limiter.acquire()
@@ -93,13 +110,14 @@ def web_search(
 
     proxy = get_proxy()
     last_error: Exception | None = None
-    raw: list[dict] | None = None
+    items: list[dict] | None = None
+    via: str | None = None
 
     for attempt in range(_MAX_ATTEMPTS):
         try:
             # timeout=10：单个引擎上限 10 秒，避免被墙引擎拖慢整体（可用的引擎通常 2-5 秒返回）
             with DDGS(proxy=proxy, timeout=10) as ddgs:
-                raw = ddgs.text(
+                items = ddgs.text(
                     query,
                     region=region,
                     safesearch="moderate",
@@ -113,18 +131,43 @@ def web_search(
             if attempt < _MAX_ATTEMPTS - 1:
                 time.sleep(_BACKOFF_SECONDS[attempt])
 
-    if not raw:
+    if not items:
         # 全引擎失败或零结果 → 浏览器搜百度兜底（百度国内直连，SERP 对真实浏览器稳定）
         from .browser_search import browser_fallback_search
 
         fallback = browser_fallback_search(query, max_results)
         if fallback:
-            return _format_results(query, fallback, timelimit, proxy, via="浏览器搜百度兜底")
-        if last_error is not None:
-            return _error_message(last_error, proxy)
-        return f"未找到与「{query}」相关的搜索结果，建议更换关键词或调整 timelimit 后重试。"
+            items, via = fallback, "浏览器搜百度兜底"
+        elif last_error is not None:
+            return _error_message(last_error, proxy)  # 失败结果不缓存
+        else:
+            return f"未找到与「{query}」相关的搜索结果，建议更换关键词或调整 timelimit 后重试。"
 
-    return _format_results(query, raw, timelimit, proxy)
+    formatted = _format_results(query, items, timelimit, proxy, via=via)
+    if fetch_top > 0:
+        formatted += _speedview(items, fetch_top)
+    search_cache.set(cache_key, formatted)
+    return formatted
+
+
+def _speedview(items: list[dict], n: int) -> str:
+    """并发抓取前 N 条结果的正文摘要，拼成「正文速览」小节（mcpsurfr passages 思路的轻量版）。"""
+    from .fetch import quick_excerpt
+
+    targets = [
+        ((it.get("href") or it.get("url") or ""), (it.get("title") or "").strip())
+        for it in items[:n]
+    ]
+    targets = [(u, t) for u, t in targets if u.startswith("http")]
+    if not targets:
+        return ""
+    with ThreadPoolExecutor(max_workers=min(4, len(targets))) as pool:
+        excerpts = list(pool.map(lambda ut: quick_excerpt(ut[0]), targets))
+
+    parts = [f"\n\n## 前 {len(targets)} 条正文速览（纯 HTTP 并发抓取，各约 800 字）"]
+    for (u, t), ex in zip(targets, excerpts):
+        parts.append(f"\n### {t or u}\n{u}\n{ex or '（速览抓取失败，可用 fetch_url_content 单独重试）'}")
+    return "\n".join(parts)
 
 
 def _format_results(

@@ -27,12 +27,21 @@ _ENV_VARS = (
 
 def detect_proxy() -> str | None:
     """返回代理 URL（如 http://127.0.0.1:7897）；无代理返回 None。"""
+    proxy, _ = detect_proxy_detail()
+    return proxy
+
+
+def detect_proxy_detail() -> tuple[str | None, str]:
+    """返回 (代理URL, 来源说明)，doctor 自检用来展示代理是从哪来的。"""
     for var in _ENV_VARS:
         value = os.environ.get(var)
         if value:
             logger.info("使用环境变量 %s 指定的代理", var)
-            return value
-    return _windows_system_proxy()
+            return value, f"环境变量 {var}"
+    system_proxy = _windows_system_proxy()
+    if system_proxy:
+        return system_proxy, "Windows 系统代理（注册表）"
+    return None, "未检测到代理（直连）"
 
 
 def _windows_system_proxy() -> str | None:
