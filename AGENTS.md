@@ -36,7 +36,7 @@ uv sync --extra browser                      # 安装依赖（已配清华 TUNA 
 - **stdout 是 stdio 协议通道，任何代码严禁向 stdout 打印/写日志**；logging 一律走 stderr（`server.py` 已配置，logger 命名 `online_search_mcp.<模块>`）。
 - 第三方依赖仅 mcp/ddgs/httpx/trafilatura（+ 可选 playwright），保持精简；同步改 `pyproject.toml` 与 `uv.lock`（跑 `uv sync`）。
 - Playwright 未安装时必须优雅降级为纯 HTTP，服务照常可用（`browser_available()` / `browser_install_hint()`）。
-- 运行期行为参数走环境变量：`FETCH_BROWSER=off`、`FETCH_BROWSER_TIMEOUT`、`FETCH_CACHE_TTL/MAX`、`SEARCH_RPM`、`SEARCH_CACHE_TTL/MAX`、`GITHUB_TOKEN`——新增可调项沿用此模式并在 README 环境变量清单登记。
+- 运行期行为参数走环境变量：`FETCH_BROWSER=off`、`FETCH_BROWSER_TIMEOUT`、`FETCH_CACHE_TTL/MAX`、`SEARCH_RPM`、`SEARCH_TIMEOUT`、`SEARCH_CACHE_TTL/MAX`、`GITHUB_TOKEN`——新增可调项沿用此模式并在 README 环境变量清单登记。
 - 所有模块文件头 `from __future__ import annotations`；注释密度与现有风格一致（模块级中文 docstring 说明设计取舍与移植来源）。
 - `refs/`（参考项目源码）已 gitignore，不入库、不 import。
 

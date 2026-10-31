@@ -154,6 +154,7 @@ PLAYWRIGHT_DOWNLOAD_HOST=https://cdn.npmmirror.com/binaries/playwright .venv\Scr
 
 - 三层防线：ddgs 多引擎聚合（失败重试 3 次）→ 全部失败时**无头浏览器搜百度兜底** → 仍失败返回友好错误
 - **自限流**：默认 6 次/分钟（`SEARCH_RPM` 可调），防止频繁搜索触发引擎对整个 IP 的封锁
+- **总时长上限**：单次搜索（含重试链与浏览器兜底）默认 45 秒内必定返回（`SEARCH_TIMEOUT` 可调，设 0 禁用）。限流期引擎会逐个挂起而非快速报错，ddgs 内部又串多个引擎，不加截止时间最坏要两分钟以上，MCP 客户端早就超时了
 - **搜索缓存**：同参数查询 5 分钟内直接命中（不占限流配额，智能体重复搜索很常见），带 `[搜索缓存命中]` 标记
 
 ## 健康自检（doctor）
@@ -165,7 +166,7 @@ PLAYWRIGHT_DOWNLOAD_HOST=https://cdn.npmmirror.com/binaries/playwright .venv\Scr
 .venv\Scripts\python -m online_search_mcp.doctor --offline # 只看配置，不联网
 ```
 
-相关环境变量：`FETCH_BROWSER=off` 关闭浏览器兜底；`FETCH_BROWSER_TIMEOUT=秒`（默认 20）；`FETCH_CACHE_TTL=秒` / `FETCH_CACHE_MAX=条`（默认 300/64，设 0 禁用）；`SEARCH_RPM=次/分钟`（默认 6）；`SEARCH_CACHE_TTL=秒` / `SEARCH_CACHE_MAX=条`（默认 300/32，设 0 禁用）。
+相关环境变量：`FETCH_BROWSER=off` 关闭浏览器兜底；`FETCH_BROWSER_TIMEOUT=秒`（默认 20）；`FETCH_CACHE_TTL=秒` / `FETCH_CACHE_MAX=条`（默认 300/64，设 0 禁用）；`SEARCH_RPM=次/分钟`（默认 6）；`SEARCH_TIMEOUT=秒`（默认 45，单次搜索总时长上限，设 0 禁用）；`SEARCH_CACHE_TTL=秒` / `SEARCH_CACHE_MAX=条`（默认 300/32，设 0 禁用）。
 
 ## 开发
 

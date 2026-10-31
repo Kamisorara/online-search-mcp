@@ -186,6 +186,7 @@ def _check_config() -> list[str]:
         f"TTL {_env_int('FETCH_CACHE_TTL', 300)}s / 最多 {_env_int('FETCH_CACHE_MAX', 64)} 条（0 为禁用）",
     )
     _row(_OK, "搜索自限流", f"{_env_int('SEARCH_RPM', 6)} 次/分钟（SEARCH_RPM）")
+    _row(_OK, "搜索总时长", f"上限 {_env_int('SEARCH_TIMEOUT', 45)}s（SEARCH_TIMEOUT，0 为禁用）")
     _row(
         _OK,
         "搜索缓存",
