@@ -1,0 +1,35 @@
+[project]
+name = "online-search-mcp"
+version = "0.1.0"
+description = "本地联网搜索 MCP 服务：DuckDuckGo 搜索 + 网页正文阅读，供智能体使用"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "mcp>=2.0.0",
+    "ddgs>=9.0.0",
+    "httpx>=0.27.0",
+    "trafilatura>=2.0.0",
+]
+
+[project.scripts]
+online-search-mcp = "online_search_mcp.server:main"
+
+[project.optional-dependencies]
+# 无头浏览器兜底：pip install -e ".[browser]" 后还需 playwright install chromium
+browser = ["playwright>=1.40"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/online_search_mcp"]
+
+[tool.uv]
+# 国内网络：禁用 uv 从 GitHub 自动下载托管 Python（会超时），改用系统已装的 Python
+python-downloads = "never"
+
+[[tool.uv.index]]
+# 清华 TUNA PyPI 镜像（替代 pypi.org 的默认源）
+url = "https://pypi.tuna.tsinghua.edu.cn/simple"
+default = true
