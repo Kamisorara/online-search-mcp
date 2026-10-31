@@ -101,6 +101,25 @@ PLAYWRIGHT_DOWNLOAD_HOST=https://cdn.npmmirror.com/binaries/playwright .venv\Scr
 }
 ```
 
+## 引导智能体主动使用（重要）
+
+挂上 MCP ≠ 智能体一定会用——模型默认倾向凭训练记忆回答。三层引导，从自动到手动：
+
+1. **工具描述（已内置，无需配置）**：每个工具的说明都写了适用场景与示例，服务级 instructions 会在 MCP 握手时注入客户端。任务里出现「最新的 / 查一下 / 找个开源项目」类字眼时，模型会自动匹配到对应工具。
+2. **指令文件（最有效，推荐配置）**：在 ZCode 的 `~/.zcode/AGENTS.md`（全局生效）或项目根的 `AGENTS.md` 里立规矩，把「先搜索」变成默认行为；Claude Code 用 `CLAUDE.md`、Cursor 用 `.cursorrules`，内容可直接复用：
+
+   ```markdown
+   ## 联网搜索规则
+   - 版本号/发布日期、近期新闻、库的最新 API、开源选型、任何不确定的事实：
+     必须先联网验证，禁止凭记忆直接回答
+   - 通用检索用 search_web（新闻类加 timelimit="w"；想直接拿答案加 fetch_top=2）
+   - 找开源项目/示例代码用 search_github（支持 language:python stars:>500 等限定符）
+   - 搜索摘要不够时用 fetch_url_content 抓原文；引用时附来源链接
+   ```
+
+   > ZCode 中工具全名为 `mcp__online-search__search_web` 等（带服务器前缀），其它客户端一般是裸名 `search_web`。
+3. **提问方式（辅助）**：「搜一下最新版」比「你知道…吗」触发率高得多；客户端里挂的 MCP 越多、工具列表越长，选择精度越稀释，不常用的建议在设置里关掉。
+
 ## 工具说明
 
 | 工具 | 参数 | 说明 |
